@@ -17,14 +17,21 @@ int winner = -1;
 
 void broadcastCommand(Command cmd) {
   radio.stopListening();
+  const char *label = (cmd == CMD_ENABLE) ? "ENABLE" : "DISABLE";
   for (int i = 0; i < 4; i++) {
     radio.openWritingPipe(ADDRESSES[i]);
-    radio.write(&cmd, sizeof(cmd));
+    Serial.print("Sending ");
+    Serial.print(label);
+    Serial.print(" to BTN");
+    Serial.println(i + 1);
+    bool ok = radio.write(&cmd, sizeof(cmd));
+    Serial.println(ok ? "Send success" : "Send failed");
   }
   radio.startListening();
 }
 
 void resetGame() {
+  Serial.println("Resetting game");
   for (int i = 0; i < 4; i++) {
     digitalWrite(LED_PINS[i], LOW);
   }
@@ -33,6 +40,7 @@ void resetGame() {
 }
 
 void setup() {
+  Serial.begin(9600);
   for (int i = 0; i < 4; i++) {
     pinMode(LED_PINS[i], OUTPUT);
   }
@@ -47,6 +55,7 @@ void setup() {
     radio.openReadingPipe(i + 1, ADDRESSES[i]);
   }
   radio.startListening();
+  Serial.println("Main controller ready");
 
   resetGame(); // Send initial enable and clear LEDs
 }
@@ -56,9 +65,15 @@ void loop() {
   if (radio.available(&pipe)) {
     uint8_t msg;
     radio.read(&msg, sizeof(msg));
+    Serial.print("Received ");
+    Serial.print(msg);
+    Serial.print(" on pipe ");
+    Serial.println(pipe);
     int idx = pipe - 1;
     if (winner < 0 && idx >= 0 && idx < 4) {
       winner = idx;
+      Serial.print("Winner is button ");
+      Serial.println(idx + 1);
       digitalWrite(LED_PINS[idx], HIGH);
       broadcastCommand(CMD_DISABLE);
     }
@@ -66,6 +81,7 @@ void loop() {
 
   // Reset button logic
   if (digitalRead(RESET_PIN) == LOW) {
+    Serial.println("Reset button pressed");
     resetGame();
     delay(200); // simple debounce
   }
