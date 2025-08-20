@@ -1,12 +1,16 @@
-#include <RF24.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
-// nRF24L01 pins: CE on 9, CSN on 10
-RF24 radio(9, 10);
+// Replace with your remote units' MAC addresses
+uint8_t REMOTE_MACS[4][6] = {
+  {0x24, 0x6F, 0x28, 0x11, 0x22, 0x33},
+  {0x24, 0x6F, 0x28, 0x44, 0x55, 0x66},
+  {0x24, 0x6F, 0x28, 0x77, 0x88, 0x99},
+  {0x24, 0x6F, 0x28, 0xAA, 0xBB, 0xCC}
+};
 
-const byte ADDRESSES[4][6] = {"BTN1", "BTN2", "BTN3", "BTN4"};
-
-const int LED_PINS[4] = {2, 3, 4, 5};
-const int RESET_PIN = 6;
+const int LED_PINS[4] = {2, 4, 16, 17};
+const int RESET_PIN = 5;
 
 enum Command : uint8_t {
   CMD_DISABLE = 0,
@@ -16,18 +20,29 @@ enum Command : uint8_t {
 int winner = -1;
 
 void broadcastCommand(Command cmd) {
-  radio.stopListening();
   const char *label = (cmd == CMD_ENABLE) ? "ENABLE" : "DISABLE";
   for (int i = 0; i < 4; i++) {
-    radio.openWritingPipe(ADDRESSES[i]);
+    esp_err_t result = esp_now_send(REMOTE_MACS[i], (uint8_t *)&cmd, sizeof(cmd));
     Serial.print("Sending ");
     Serial.print(label);
-    Serial.print(" to BTN");
-    Serial.println(i + 1);
-    bool ok = radio.write(&cmd, sizeof(cmd));
-    Serial.println(ok ? "Send success" : "Send failed");
+    Serial.print(" to remote ");
+    Serial.print(i + 1);
+    Serial.print(": ");
+    Serial.println(result == ESP_OK ? "Success" : "Fail");
   }
-  radio.startListening();
+}
+
+void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  if (len == 1 && winner < 0) {
+    int idx = incomingData[0] - 1;
+    if (idx >= 0 && idx < 4) {
+      winner = idx;
+      Serial.print("Winner is button ");
+      Serial.println(idx + 1);
+      digitalWrite(LED_PINS[idx], HIGH);
+      broadcastCommand(CMD_DISABLE);
+    }
+  }
 }
 
 void resetGame() {
@@ -40,50 +55,35 @@ void resetGame() {
 }
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   for (int i = 0; i < 4; i++) {
     pinMode(LED_PINS[i], OUTPUT);
   }
   pinMode(RESET_PIN, INPUT_PULLUP);
 
-  radio.begin();
-  radio.setPALevel(RF24_PA_LOW);
-  radio.setDataRate(RF24_250KBPS);
-
-  // Open reading pipes for each remote
-  for (int i = 0; i < 4; i++) {
-    radio.openReadingPipe(i + 1, ADDRESSES[i]);
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
   }
-  radio.startListening();
-  Serial.println("Main controller ready");
 
-  resetGame(); // Send initial enable and clear LEDs
+  esp_now_register_recv_cb(onDataRecv);
+
+  for (int i = 0; i < 4; i++) {
+    esp_now_peer_info_t peerInfo{};
+    memcpy(peerInfo.peer_addr, REMOTE_MACS[i], 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    esp_now_add_peer(&peerInfo);
+  }
+
+  resetGame();
 }
 
 void loop() {
-  uint8_t pipe;
-  if (radio.available(&pipe)) {
-    uint8_t msg;
-    radio.read(&msg, sizeof(msg));
-    Serial.print("Received ");
-    Serial.print(msg);
-    Serial.print(" on pipe ");
-    Serial.println(pipe);
-    int idx = pipe - 1;
-    if (winner < 0 && idx >= 0 && idx < 4) {
-      winner = idx;
-      Serial.print("Winner is button ");
-      Serial.println(idx + 1);
-      digitalWrite(LED_PINS[idx], HIGH);
-      broadcastCommand(CMD_DISABLE);
-    }
-  }
-
-  // Reset button logic
   if (digitalRead(RESET_PIN) == LOW) {
-    Serial.println("Reset button pressed");
     resetGame();
-    delay(200); // simple debounce
+    delay(200);
   }
 }
 
