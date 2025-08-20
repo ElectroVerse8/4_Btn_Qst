@@ -1,11 +1,12 @@
 #include <esp_now.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 // Replace with your main controller's MAC address
-uint8_t MAIN_MAC[6] = {0x24, 0x6F, 0x28, 0xAA, 0xBB, 0xCC};
+uint8_t MAIN_MAC[6] = {0x3C, 0x71, 0xBF, 0xAA, 0xF2, 0x50};
 
 const uint8_t NODE_ID = 1;
-const int BUTTON_PIN = 2;
+const int BUTTON_PIN = 23;
 
 enum Command : uint8_t {
   CMD_DISABLE = 0,
@@ -14,7 +15,8 @@ enum Command : uint8_t {
 
 bool enabled = false;
 
-void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+void onDataRecv(const esp_now_recv_info_t* info, const uint8_t* incomingData, int len) {
+  const uint8_t* mac = info->src_addr;
   if (len == 1) {
     enabled = (incomingData[0] == CMD_ENABLE);
     Serial.print("Received command: ");
@@ -27,6 +29,9 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_ps(WIFI_PS_NONE);
+  esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+  ESP_ERROR_CHECK(esp_now_init());
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
