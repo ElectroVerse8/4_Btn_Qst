@@ -1,13 +1,14 @@
 # 4 Button Quiz System
 
 This repository contains Arduino sketches for a simple quiz-style button system using
-nRF24L01 radios.
+ESP32 modules communicating over the ESP-NOW protocol.
 
 ## Components
 
 - Four battery-powered remote units (`remote_button1` to `remote_button4`).
-  Each remote has a single push button and an nRF24L01 module.
-- One main controller (`main_controller`) with four LEDs and a reset button.
+  Each remote is an ESP32 with a single push button.
+- One main controller (`main_controller`) using an ESP32 with four LEDs and a reset
+  button.
 
 ## Behaviour
 
@@ -20,7 +21,12 @@ nRF24L01 radios.
 Remote sketches ignore button presses until an enable command is received from
 the main controller, which helps conserve battery power.
 
-Upload the appropriate sketch to each Arduino Nano. All sketches assume the
-nRF24L01 is connected with CE on pin 9 and CSN on pin 10.
+Each remote sketch contains a `MAIN_MAC` array that must be set to the MAC address
+of the main controller. The main controller sketch contains a `REMOTE_MACS`
+array that must be populated with the MAC addresses of all remotes. You can obtain
+these addresses by running `WiFi.macAddress()` on each ESP32.
+
+Upload the appropriate sketch to each ESP32 using the Arduino IDE or
+`arduino-cli`.
 
 

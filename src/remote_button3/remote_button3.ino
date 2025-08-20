@@ -1,9 +1,10 @@
-#include <RF24.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
-RF24 radio(9, 10);
+// Replace with your main controller's MAC address
+uint8_t MAIN_MAC[6] = {0x24, 0x6F, 0x28, 0xAA, 0xBB, 0xCC};
 
-const byte ADDRESS[6] = "BTN3"; // Unique pipe address for this node
-
+const uint8_t NODE_ID = 3;
 const int BUTTON_PIN = 2;
 
 enum Command : uint8_t {
@@ -13,36 +14,43 @@ enum Command : uint8_t {
 
 bool enabled = false;
 
+void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  if (len == 1) {
+    enabled = (incomingData[0] == CMD_ENABLE);
+    Serial.print("Received command: ");
+    Serial.println(enabled ? "ENABLE" : "DISABLE");
+  }
+}
+
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  radio.begin();
-  radio.setPALevel(RF24_PA_LOW);
-  radio.setDataRate(RF24_250KBPS);
-  radio.openWritingPipe(ADDRESS);
-  radio.openReadingPipe(1, ADDRESS);
-  radio.startListening();
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  esp_now_register_recv_cb(onDataRecv);
+
+  esp_now_peer_info_t peerInfo{};
+  memcpy(peerInfo.peer_addr, MAIN_MAC, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Failed to add peer");
+    return;
+  }
+
   Serial.println("Remote button 3 ready");
 }
 
 void loop() {
-  if (radio.available()) {
-    uint8_t cmd;
-    radio.read(&cmd, sizeof(cmd));
-    enabled = (cmd == CMD_ENABLE);
-    Serial.print("Received command: ");
-    Serial.println(enabled ? "ENABLE" : "DISABLE");
-  }
-
   if (enabled && digitalRead(BUTTON_PIN) == LOW) {
-    Serial.println("Button pressed");
-    radio.stopListening();
-    uint8_t msg = 3; // This node's ID
-    Serial.println("Sending ID 3");
-    bool ok = radio.write(&msg, sizeof(msg));
-    Serial.println(ok ? "Send success" : "Send failed");
-    radio.startListening();
+    uint8_t msg = NODE_ID;
+    esp_err_t result = esp_now_send(MAIN_MAC, &msg, sizeof(msg));
+    Serial.println(result == ESP_OK ? "Send success" : "Send failed");
     enabled = false;
     delay(50);
   }
