@@ -1,85 +1,157 @@
+// ============================
+// REMOTE_BUTTON_ESP_NOW_3X.ino
+// ============================
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <WiFi.h>
 
-// Replace with your main controller's MAC address
-uint8_t MAIN_MAC[6] = {0x24, 0x6F, 0x28, 0xAA, 0xBB, 0xCC};
+// ---------- CONFIG ----------
+#define WIFI_CHANNEL 1           // All devices must match
+#define NODE_ID     1            // <-- set 1..4 uniquely per remote
+#define LED_PIN     2            // Your LED pin
+#define BUTTON_PIN  23           // Your button pin (active LOW)
 
-const uint8_t NODE_ID = 4;
-const int BUTTON_PIN = 2;
+// Main controller MAC (replace with your controller's MAC!)
+uint8_t MAIN_MAC[6] = { 0x3C,0x71,0xBF,0xAB,0x0D,0xBC};
 
-enum Command : uint8_t {
-  CMD_DISABLE = 0,
-  CMD_ENABLE = 1,
-  CMD_CHECK = 2,
-  CMD_DONE = 3
+// ---------- PROTOCOL ----------
+enum MsgType : uint8_t { HELLO=1, HELLO_ACK, ARM, BUZZ, WIN, DISABLE, ENABLE, PING, DONE };
+
+#pragma pack(push,1)
+struct Msg {
+  uint8_t  type;
+  uint8_t  node_id;
+  uint16_t seq;
+  uint32_t t_us;
+  uint8_t  payload8;
 };
+#pragma pack(pop)
 
-const uint8_t NODE_MSG_BASE = 10;
+// ---------- STATE ----------
+volatile bool armed   = false;
+volatile bool locked  = false;
+volatile bool gotWin  = false;
+volatile uint8_t winnerId = 0;
 
-bool enabled = false;
-bool checking = false;
+uint16_t txSeq = 1;
+uint16_t lastSeqFromMain = 0;
 
-void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
-  if (len == 1) {
-    uint8_t cmd = incomingData[0];
-    if (cmd == CMD_ENABLE) {
-      enabled = true;
-      Serial.println("Received command: ENABLE");
-    } else if (cmd == CMD_DISABLE) {
-      enabled = false;
-      Serial.println("Received command: DISABLE");
-      uint8_t done = CMD_DONE;
-      esp_now_send(mac, &done, sizeof(done));
-    } else if (cmd == CMD_CHECK) {
-      Serial.println("Received command: CHECK");
-      checking = true;
-    }
+static inline bool newer(uint16_t a, uint16_t b) { return (uint16_t)(a - b) != 0; }
+
+void blink(uint8_t times, uint16_t onMs=60, uint16_t offMs=60) {
+  for (uint8_t i=0;i<times;i++){
+    digitalWrite(LED_PIN, HIGH); delay(onMs);
+    digitalWrite(LED_PIN, LOW);  delay(offMs);
   }
+}
+
+void addPeer(const uint8_t mac[6]) {
+  esp_now_peer_info_t p{};
+  memcpy(p.peer_addr, mac, 6);
+  p.channel = WIFI_CHANNEL;
+  p.ifidx = WIFI_IF_STA;
+  p.encrypt = false;
+  esp_now_add_peer(&p);
+}
+
+void sendToMain(uint8_t type, uint8_t payload8=0, uint32_t tstamp=0) {
+  Msg m{type, NODE_ID, txSeq++, tstamp ? tstamp : (uint32_t)micros(), payload8};
+  esp_now_send(MAIN_MAC, (uint8_t*)&m, sizeof(m));
+}
+
+// NEW 3.x RX callback signature
+void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
+  if (len != sizeof(Msg) || !info) return;
+
+  const uint8_t* mac = info->src_addr;          // sender MAC (main)
+  Msg m; memcpy(&m, data, sizeof(Msg));
+
+  // Only trust main
+  if (memcmp(mac, MAIN_MAC, 6) != 0) return;
+  if (!newer(m.seq, lastSeqFromMain)) return;
+  lastSeqFromMain = m.seq;
+
+  switch (m.type) {
+    case HELLO_ACK:
+      // quick visual confirm
+      digitalWrite(LED_PIN, HIGH); delay(60); digitalWrite(LED_PIN, LOW);
+      break;
+    case ARM:
+      armed  = true;
+      locked = false;
+      gotWin = false;
+      winnerId = 0;
+      break;
+    case WIN:
+      gotWin = true;
+      winnerId = m.payload8;
+      if (winnerId == NODE_ID) {
+        digitalWrite(LED_PIN, HIGH); // hold until DISABLE
+      } else {
+        blink(2, 50, 50);
+      }
+      break;
+    case DISABLE:
+      armed  = false;
+      locked = true;
+      digitalWrite(LED_PIN, LOW);
+      // Optional: enter light sleep here to save battery
+      // esp_sleep_enable_timer_wakeup(5ULL * 60 * 1000000ULL);
+      // esp_light_sleep_start();
+      break;
+    case ENABLE:
+      // ready for next ARM (no action required)
+      break;
+    default: break;
+  }
+}
+
+void IRAM_ATTR onButtonISR() {
+  if (!armed || locked) return;
+  static uint32_t lastInt = 0;
+  uint32_t now = micros();
+  if ((now - lastInt) < 20000) return; // 20 ms debounce
+  lastInt = now;
+
+  // Lock immediately; send exactly once
+  locked = true;
+  armed  = false;
+  sendToMain(BUZZ, /*payload*/0, now);
 }
 
 void setup() {
-  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), onButtonISR, FALLING);
 
+  // Force channel and init ESP-NOW
   WiFi.mode(WIFI_STA);
+  esp_wifi_set_promiscuous(true);
+  esp_wifi_set_channel(WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  esp_wifi_set_promiscuous(false);
+
   if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
+    // Fatal: slow blink forever
+    while (true) { blink(1, 400, 400); }
   }
 
-  esp_now_register_recv_cb(onDataRecv);
+  addPeer(MAIN_MAC);
+  esp_now_register_recv_cb(onRecv);
 
-  esp_now_peer_info_t peerInfo{};
-  memcpy(peerInfo.peer_addr, MAIN_MAC, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Failed to add peer");
-    return;
-  }
+  // Announce presence
+  sendToMain(HELLO);
 
-  Serial.println("Remote button 4 ready");
+   //(Optional) Print my MAC for pairing
+   Serial.begin(115200);
+   Serial.print("Remote MAC: "); Serial.println(WiFi.macAddress());
 }
 
 void loop() {
-  static unsigned long lastSend = 0;
-  if (checking && digitalRead(BUTTON_PIN) == LOW) {
-    unsigned long now = millis();
-    if (now - lastSend > 100) {
-      uint8_t resp = CMD_CHECK;
-      esp_now_send(MAIN_MAC, &resp, sizeof(resp));
-      checking = false;
-      lastSend = now;
-    }
-  }
-  if (enabled && digitalRead(BUTTON_PIN) == LOW) {
-    unsigned long now = millis();
-    if (now - lastSend > 100) {
-      uint8_t msg = NODE_MSG_BASE + NODE_ID;
-      esp_err_t result = esp_now_send(MAIN_MAC, &msg, sizeof(msg));
-      Serial.println(result == ESP_OK ? "Send success" : "Send failed");
-      lastSend = now;
-    }
+  // Minimal keepalive while not locked
+  static uint32_t t0 = 0;
+  if (!locked && millis() - t0 > 1000) {
+    t0 = millis();
+    sendToMain(PING);
   }
 }
-
