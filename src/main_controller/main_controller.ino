@@ -31,6 +31,21 @@ struct Msg {
 };
 #pragma pack(pop)
 
+const char* msgTypeStr(uint8_t type){
+  switch(type){
+    case HELLO:     return "HELLO";
+    case HELLO_ACK: return "HELLO_ACK";
+    case ARM:       return "ARM";
+    case BUZZ:      return "BUZZ";
+    case WIN:       return "WIN";
+    case DISABLE:   return "DISABLE";
+    case ENABLE:    return "ENABLE";
+    case PING:      return "PING";
+    case DONE:      return "DONE";
+    default:        return "?";
+  }
+}
+
 // ---------- STATE ----------
 struct RemoteState {
   bool discovered = false;
@@ -64,14 +79,18 @@ void ledBlinkIdx(int idx, int times, int onMs=60, int offMs=60){
 }
 
 void sendAll(uint8_t type, uint8_t payload8=0){
-  Msg m{type, 0, txSeq++, (uint32_t)micros(), payload8};
+  uint16_t seq = txSeq++;
+  Msg m{type, 0, seq, (uint32_t)micros(), payload8};
   for (int i=0;i<4;i++) esp_now_send(REMOTE_MACS[i], (uint8_t*)&m, sizeof(m));
+  Serial.printf("Main->All %s seq=%u payload=%u\n", msgTypeStr(type), seq, payload8);
 }
 
 void sendTo(uint8_t node_id_1to4, uint8_t type){
   if (node_id_1to4 < 1 || node_id_1to4 > 4) return;
-  Msg m{type, node_id_1to4, txSeq++, (uint32_t)micros(), 0};
+  uint16_t seq = txSeq++;
+  Msg m{type, node_id_1to4, seq, (uint32_t)micros(), 0};
   esp_now_send(REMOTE_MACS[node_id_1to4-1], (uint8_t*)&m, sizeof(m));
+  Serial.printf("Main->%u %s seq=%u\n", node_id_1to4, msgTypeStr(type), seq);
 }
 
 // NEW 3.x RX callback signature
@@ -90,6 +109,8 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len){
 
   if (!newer(m.seq, R[idx].lastSeq)) return;
   R[idx].lastSeq = m.seq;
+
+  Serial.printf("Main<- %u %s seq=%u\n", idx+1, msgTypeStr(m.type), m.seq);
 
   switch (m.type) {
     case HELLO:
@@ -123,6 +144,7 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len){
 }
 
 void discoverSequence(){
+  Serial.println("Discovering remotes...");
   uint32_t tStart = millis();
   while (true) {
     bool all = true;
@@ -140,6 +162,7 @@ void discoverSequence(){
     if (all) break;
     if (millis() - tStart > 8000) break; // safety cap
   }
+  Serial.println("Discovery complete");
 }
 
 void armGame(){
@@ -150,6 +173,7 @@ void armGame(){
   sendAll(ENABLE);
   delay(50);
   sendAll(ARM);
+  Serial.println("Game armed");
 }
 
 void setup(){
@@ -177,6 +201,7 @@ void setup(){
   // (Optional) print my MAC to help fill MAIN_MAC on remotes
    Serial.begin(115200);
    Serial.print("Main MAC: "); Serial.println(WiFi.macAddress());
+   Serial.println("Main controller setup complete");
 
   // Startup discovery and ready-up
   discoverSequence();
@@ -192,5 +217,6 @@ void loop(){
     }
     armGame();
     delay(250);
+    Serial.println("Game reset");
   }
 }
