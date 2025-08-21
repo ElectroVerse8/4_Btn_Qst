@@ -4,6 +4,7 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <WiFi.h>
+extern "C" void ets_printf(const char* fmt, ...);
 
 // ---------- CONFIG ----------
 #define WIFI_CHANNEL 1           // All devices must match
@@ -26,6 +27,21 @@ struct Msg {
   uint8_t  payload8;
 };
 #pragma pack(pop)
+
+const char* msgTypeStr(uint8_t type){
+  switch(type){
+    case HELLO:     return "HELLO";
+    case HELLO_ACK: return "HELLO_ACK";
+    case ARM:       return "ARM";
+    case BUZZ:      return "BUZZ";
+    case WIN:       return "WIN";
+    case DISABLE:   return "DISABLE";
+    case ENABLE:    return "ENABLE";
+    case PING:      return "PING";
+    case DONE:      return "DONE";
+    default:        return "?";
+  }
+}
 
 // ---------- STATE ----------
 volatile bool armed   = false;
@@ -55,8 +71,10 @@ void addPeer(const uint8_t mac[6]) {
 }
 
 void sendToMain(uint8_t type, uint8_t payload8=0, uint32_t tstamp=0) {
-  Msg m{type, NODE_ID, txSeq++, tstamp ? tstamp : (uint32_t)micros(), payload8};
+  uint16_t seq = txSeq++;
+  Msg m{type, NODE_ID, seq, tstamp ? tstamp : (uint32_t)micros(), payload8};
   esp_now_send(MAIN_MAC, (uint8_t*)&m, sizeof(m));
+  Serial.printf("Remote%u->Main %s seq=%u payload=%u\n", NODE_ID, msgTypeStr(type), seq, payload8);
 }
 
 // NEW 3.x RX callback signature
@@ -70,6 +88,8 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   if (memcmp(mac, MAIN_MAC, 6) != 0) return;
   if (!newer(m.seq, lastSeqFromMain)) return;
   lastSeqFromMain = m.seq;
+
+  Serial.printf("Remote%u<-Main %s seq=%u\n", NODE_ID, msgTypeStr(m.type), m.seq);
 
   switch (m.type) {
     case HELLO_ACK:
@@ -117,6 +137,7 @@ void IRAM_ATTR onButtonISR() {
   locked = true;
   armed  = false;
   sendToMain(BUZZ, /*payload*/0, now);
+  ets_printf("Remote%u button pressed\n", NODE_ID);
 }
 
 void setup() {
@@ -145,6 +166,7 @@ void setup() {
    //(Optional) Print my MAC for pairing
    Serial.begin(115200);
    Serial.print("Remote MAC: "); Serial.println(WiFi.macAddress());
+   Serial.println("Remote setup complete");
 }
 
 void loop() {
@@ -153,5 +175,6 @@ void loop() {
   if (!locked && millis() - t0 > 1000) {
     t0 = millis();
     sendToMain(PING);
+    Serial.println("Sent PING");
   }
 }
