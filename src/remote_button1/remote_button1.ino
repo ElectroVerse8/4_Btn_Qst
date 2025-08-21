@@ -4,7 +4,7 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <WiFi.h>
-extern "C" void ets_printf(const char* fmt, ...);
+//extern "C" void ets_printf(const char* fmt, ...);
 
 // ---------- CONFIG ----------
 #define WIFI_CHANNEL 1           // All devices must match

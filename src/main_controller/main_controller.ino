@@ -69,7 +69,7 @@ void addPeer(const uint8_t mac[6]) {
   esp_now_add_peer(&p);
 }
 
-void ledAllOff() { for (int i=0;i<4;i++) digitalWrite(LED_PINS[i], LOW); }
+void ledAllOff() { for (int i=0; i<4; i++) digitalWrite(LED_PINS[i], LOW); }
 
 void ledBlinkIdx(int idx, int times, int onMs=60, int offMs=60){
   for (int k=0;k<times;k++){
