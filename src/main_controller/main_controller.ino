@@ -15,33 +15,86 @@ const int RESET_PIN = 23;
 
 enum Command : uint8_t {
   CMD_DISABLE = 0,
-  CMD_ENABLE = 1
+  CMD_ENABLE = 1,
+  CMD_CHECK = 2,
+  CMD_DONE = 3
 };
+
+const uint8_t NODE_MSG_BASE = 10;
+
+bool checked[4] = {false, false, false, false};
+bool done[4] = {false, false, false, false};
+bool disabling = false;
 
 int winner = -1;
 
+void sendCommandTo(int idx, Command cmd) {
+  esp_err_t result = esp_now_send(REMOTE_MACS[idx], (uint8_t *)&cmd, sizeof(cmd));
+  Serial.print("Sending command ");
+  Serial.print(cmd);
+  Serial.print(" to remote ");
+  Serial.print(idx + 1);
+  Serial.print(": ");
+  Serial.println(result == ESP_OK ? "Success" : "Fail");
+}
+
 void broadcastCommand(Command cmd) {
-  const char *label = (cmd == CMD_ENABLE) ? "ENABLE" : "DISABLE";
   for (int i = 0; i < 4; i++) {
-    esp_err_t result = esp_now_send(REMOTE_MACS[i], (uint8_t *)&cmd, sizeof(cmd));
-    Serial.print("Sending ");
-    Serial.print(label);
-    Serial.print(" to remote ");
-    Serial.print(i + 1);
-    Serial.print(": ");
-    Serial.println(result == ESP_OK ? "Success" : "Fail");
+    sendCommandTo(i, cmd);
+  }
+}
+
+bool allDone() {
+  for (int i = 0; i < 4; i++) {
+    if (!done[i]) return false;
+  }
+  return true;
+}
+
+void checkButtons() {
+  for (int i = 0; i < 4; i++) {
+    checked[i] = false;
+    unsigned long start = millis();
+    sendCommandTo(i, CMD_CHECK);
+    while (!checked[i] && millis() - start < 3000) {
+      digitalWrite(LED_PINS[i], HIGH);
+      delay(100);
+      digitalWrite(LED_PINS[i], LOW);
+      delay(100);
+    }
+    if (checked[i]) {
+      digitalWrite(LED_PINS[i], HIGH);
+      delay(1000);
+      digitalWrite(LED_PINS[i], LOW);
+    }
   }
 }
 
 void onDataRecv(const esp_now_recv_info_t* info, const uint8_t* incomingData, int len) {
   const uint8_t* mac = info->src_addr;
-  if (len == 1 && winner < 0) {
-    int idx = incomingData[0] - 1;
-    if (idx >= 0 && idx < 4) {
+  int srcIdx = -1;
+  for (int i = 0; i < 4; i++) {
+    if (memcmp(mac, REMOTE_MACS[i], 6) == 0) {
+      srcIdx = i;
+      break;
+    }
+  }
+  if (len == 1) {
+    uint8_t val = incomingData[0];
+    if (val == CMD_CHECK && srcIdx >= 0) {
+      checked[srcIdx] = true;
+    } else if (val == CMD_DONE && srcIdx >= 0) {
+      done[srcIdx] = true;
+    } else if (winner < 0 && val >= NODE_MSG_BASE + 1 && val <= NODE_MSG_BASE + 4) {
+      int idx = val - NODE_MSG_BASE - 1;
       winner = idx;
       Serial.print("Winner is button ");
       Serial.println(idx + 1);
       digitalWrite(LED_PINS[idx], HIGH);
+      for (int j = 0; j < 4; j++) {
+        done[j] = false;
+      }
+      disabling = true;
       broadcastCommand(CMD_DISABLE);
     }
   }
@@ -82,10 +135,19 @@ void setup() {
     esp_now_add_peer(&peerInfo);
   }
 
+  checkButtons();
   resetGame();
 }
 
 void loop() {
+  if (disabling) {
+    if (!allDone()) {
+      broadcastCommand(CMD_DISABLE);
+    } else {
+      disabling = false;
+    }
+    delay(200);
+  }
   if (digitalRead(RESET_PIN) == LOW) {
     resetGame();
     delay(200);
