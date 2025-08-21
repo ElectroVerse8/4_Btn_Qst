@@ -12,10 +12,12 @@ ESP32 modules communicating over the ESP-NOW protocol.
 
 ## Behaviour
 
-1. On start-up the main controller enables all remote buttons.
-2. The first remote button pressed causes the corresponding LED on the main
+1. On start-up the main controller checks each remote in turn. It waits for a
+   button press from the current remote before moving on to the next.
+2. After all remotes have confirmed, the controller enables all remote buttons.
+3. The first remote button pressed causes the corresponding LED on the main
    controller to light. All other remotes are disabled.
-3. Pressing the reset button on the main controller turns off all LEDs and
+4. Pressing the reset button on the main controller turns off all LEDs and
    re-enables all remotes.
 
 Remote sketches ignore button presses until an enable command is received from
