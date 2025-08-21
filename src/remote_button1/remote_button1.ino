@@ -18,6 +18,7 @@ enum Command : uint8_t {
 const uint8_t NODE_MSG_BASE = 10; // base value for node press messages
 
 bool enabled = false;
+bool checking = false;
 
 void onDataRecv(const esp_now_recv_info_t* info, const uint8_t* incomingData, int len) {
   const uint8_t* mac = info->src_addr;
@@ -33,8 +34,7 @@ void onDataRecv(const esp_now_recv_info_t* info, const uint8_t* incomingData, in
       esp_now_send(mac, &done, sizeof(done));
     } else if (cmd == CMD_CHECK) {
       Serial.println("Received command: CHECK");
-      uint8_t resp = CMD_CHECK;
-      esp_now_send(mac, &resp, sizeof(resp));
+      checking = true;
     }
   }
 }
@@ -68,6 +68,15 @@ void setup() {
 
 void loop() {
   static unsigned long lastSend = 0;
+  if (checking && digitalRead(BUTTON_PIN) == LOW) {
+    unsigned long now = millis();
+    if (now - lastSend > 100) {
+      uint8_t resp = CMD_CHECK;
+      esp_now_send(MAIN_MAC, &resp, sizeof(resp));
+      checking = false;
+      lastSend = now;
+    }
+  }
   if (enabled && digitalRead(BUTTON_PIN) == LOW) {
     unsigned long now = millis();
     if (now - lastSend > 100) {

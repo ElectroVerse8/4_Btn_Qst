@@ -54,19 +54,16 @@ bool allDone() {
 void checkButtons() {
   for (int i = 0; i < 4; i++) {
     checked[i] = false;
-    unsigned long start = millis();
     sendCommandTo(i, CMD_CHECK);
-    while (!checked[i] && millis() - start < 3000) {
+    while (!checked[i]) {
       digitalWrite(LED_PINS[i], HIGH);
       delay(100);
       digitalWrite(LED_PINS[i], LOW);
       delay(100);
     }
-    if (checked[i]) {
-      digitalWrite(LED_PINS[i], HIGH);
-      delay(1000);
-      digitalWrite(LED_PINS[i], LOW);
-    }
+    digitalWrite(LED_PINS[i], HIGH);
+    delay(1000);
+    digitalWrite(LED_PINS[i], LOW);
   }
 }
 
