@@ -92,6 +92,10 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   Serial.printf("Remote%u<-Main %s seq=%u\n", NODE_ID, msgTypeStr(m.type), m.seq);
 
   switch (m.type) {
+    case HELLO:
+    case PING:
+      sendToMain(HELLO_ACK);
+      break;
     case HELLO_ACK:
       // quick visual confirm
       digitalWrite(LED_PIN, HIGH); delay(60); digitalWrite(LED_PIN, LOW);

@@ -50,6 +50,7 @@ const char* msgTypeStr(uint8_t type){
 struct RemoteState {
   bool discovered = false;
   uint16_t lastSeq = 0;
+  uint32_t lastSeenMs = 0;  // millis() when we last heard from this remote
 } R[4];
 
 volatile bool armed  = false;
@@ -109,13 +110,14 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len){
 
   if (!newer(m.seq, R[idx].lastSeq)) return;
   R[idx].lastSeq = m.seq;
+  R[idx].lastSeenMs = millis();
+  R[idx].discovered = true;
 
   Serial.printf("Main<- %u %s seq=%u\n", idx+1, msgTypeStr(m.type), m.seq);
 
   switch (m.type) {
     case HELLO:
     case PING: {
-      R[idx].discovered = true;
       // LED tick confirm
       digitalWrite(LED_PINS[idx], HIGH); delay(50); digitalWrite(LED_PINS[idx], LOW);
       // Ack
@@ -145,22 +147,20 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len){
 
 void discoverSequence(){
   Serial.println("Discovering remotes...");
-  uint32_t tStart = millis();
-  while (true) {
-    bool all = true;
-    for (int i=0;i<4;i++){
-      if (!R[i].discovered){
-        all = false;
-        // Your "check" behavior: flash the LED while pinging
-        digitalWrite(LED_PINS[i], HIGH);
-        sendTo(i+1, HELLO);
-        delay(80);
-        digitalWrite(LED_PINS[i], LOW);
-        delay(80);
-      }
+  for (int i=0;i<4;i++){
+    R[i].discovered = false;
+    uint32_t start = millis();
+    while (!R[i].discovered && millis() - start < 2000){
+      digitalWrite(LED_PINS[i], HIGH);
+      sendTo(i+1, HELLO);
+      delay(80);
+      digitalWrite(LED_PINS[i], LOW);
+      delay(80);
     }
-    if (all) break;
-    if (millis() - tStart > 8000) break; // safety cap
+    if (!R[i].discovered){
+      Serial.printf("Remote %d not responding\n", i+1);
+      ledBlinkIdx(i, 6, 40, 40); // fast blink error
+    }
   }
   Serial.println("Discovery complete");
 }
@@ -209,6 +209,19 @@ void setup(){
 }
 
 void loop(){
+  uint32_t now = millis();
+  static uint32_t lastPing = 0;
+
+  if (armed && now - lastPing > 1000){
+    lastPing = now;
+    sendAll(PING);
+    for (int i=0;i<4;i++){
+      if (R[i].discovered && (now - R[i].lastSeenMs > 2000)){
+        ledBlinkIdx(i, 4, 30, 30); // fast blink missing remote
+      }
+    }
+  }
+
   // Reset for next round
   if (digitalRead(RESET_PIN) == LOW) {
     // quick visual sweep
