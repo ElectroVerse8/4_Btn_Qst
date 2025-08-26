@@ -93,17 +93,20 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
 
   switch (m.type) {
     case HELLO:
+      digitalWrite(LED_PIN, LOW);
     case PING:
       sendToMain(HELLO_ACK);
       break;
     case HELLO_ACK:
       // no LED feedback; LED reserved for winner indication
+      digitalWrite(LED_PIN, LOW);
       break;
     case ARM:
       armed  = true;
       locked = false;
       gotWin = false;
       winnerId = 0;
+      digitalWrite(LED_PIN, LOW);
       break;
     case WIN:
       gotWin = true;
@@ -121,9 +124,10 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
       // esp_light_sleep_start();
       break;
     case ENABLE:
+      digitalWrite(LED_PIN, LOW);
       // ready for next ARM (no action required)
       break;
-    default: break;
+    default:digitalWrite(LED_PIN, LOW); break;
   }
 }
 
