@@ -97,8 +97,7 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
       sendToMain(HELLO_ACK);
       break;
     case HELLO_ACK:
-      // quick visual confirm
-      digitalWrite(LED_PIN, HIGH); delay(60); digitalWrite(LED_PIN, LOW);
+      // no LED feedback; LED reserved for winner indication
       break;
     case ARM:
       armed  = true;
@@ -111,8 +110,6 @@ void onRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
       winnerId = m.payload8;
       if (winnerId == NODE_ID) {
         digitalWrite(LED_PIN, HIGH); // hold until DISABLE
-      } else {
-        blink(2, 50, 50);
       }
       break;
     case DISABLE:
