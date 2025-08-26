@@ -4,11 +4,11 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <WiFi.h>
-extern "C" void ets_printf(const char* fmt, ...);
+//extern "C" void ets_printf(const char* fmt, ...);
 
 // ---------- CONFIG ----------
 #define WIFI_CHANNEL 1           // All devices must match
-#define NODE_ID     1            // <-- set 1..4 uniquely per remote
+#define NODE_ID     3            // <-- set 1..4 uniquely per remote
 #define LED_PIN     2            // Your LED pin
 #define BUTTON_PIN  23           // Your button pin (active LOW)
 
